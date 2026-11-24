@@ -40,8 +40,12 @@ def _error(body: str) -> tuple[str, str] | None:
     return (root.findtext("ErrorCode") or "?").strip(), (root.findtext("ErrorMessage") or "").strip()
 
 
-def fetch_statement(token: str, query_id: str, attempts: int = 15, wait: float = 6.0) -> str:
-    """Generate the Flex Query report and return its XML text."""
+def fetch_statement(token: str, query_id: str, attempts: int = 30, max_wait: int = 30) -> str:
+    """Generate the Flex Query report and return its XML text.
+
+    IBKR can take several minutes to build a long report, so this keeps asking for
+    up to about 14 minutes, waiting a little longer each time.
+    """
     params = {"t": token, "q": query_id, "v": "3"}
     for i in range(4):
         body = _get("SendRequest", params)
@@ -54,16 +58,23 @@ def fetch_statement(token: str, query_id: str, attempts: int = 15, wait: float =
     ref = ET.fromstring(body).findtext("ReferenceCode")
     if not ref:
         raise FlexError("SendRequest returned no ReferenceCode")
+    print("IBKR accepted the request; waiting for the statement...", flush=True)
 
+    waited, err = 0, None
     for i in range(attempts):
-        time.sleep(3 if i == 0 else wait)
+        delay = min(max_wait, 5 * (i + 1))
+        time.sleep(delay)
+        waited += delay
         body = _get("GetStatement", {"t": token, "q": ref.strip(), "v": "3"})
         err = _error(body)
         if err is None:
+            print(f"Statement ready after {waited}s", flush=True)
             return body
+        print(f"  {waited}s: IBKR says {err[0]} {err[1]}", flush=True)
         if err[0] not in RETRYABLE:
             raise FlexError(f"GetStatement failed: {err[0]} {err[1]}")
-    raise FlexError("Statement was still generating after all retries; try again later")
+    raise FlexError(f"IBKR had not produced the statement after {waited // 60} minutes "
+                    f"(last reply {err[0]} {err[1]}). Try a shorter Period in the Flex Query.")
 
 
 def parse_date(value: str | None) -> date | None:
