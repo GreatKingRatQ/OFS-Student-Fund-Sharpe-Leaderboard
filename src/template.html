@@ -178,7 +178,7 @@ function render() {
     const s = m.s, ok = m.s.ranked;
     const left = ok ? (Math.min(0, s.sharpe) - lo) / span * 100 : 0, w = ok ? Math.abs(s.sharpe) / span * 100 : 0;
     const sp = n ? m.spark.slice(-(n + 1)) : m.spark;
-    const why = !s.days ? 'No IBKR account linked yet' : `${s.days} of ${win === '1m' ? 15 : D.min_days} trading days needed`;
+    const why = m.note || (s.days ? `${s.days} of ${win === '1m' ? 15 : D.min_days} trading days needed` : 'No IBKR account linked yet');
     return `<tr class="${ok ? (m.rank <= 3 ? 'top3' : '') : 'unr'}">
       <td class="rank">${ok ? `<span>${m.rank}</span>` : ''}</td>
       <td class="who"><b>${esc(m.name)}</b><small>${esc(m.role)}${ok ? '' : ' · ' + esc(why)}</small></td>

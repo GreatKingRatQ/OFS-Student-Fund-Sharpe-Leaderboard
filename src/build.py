@@ -59,7 +59,28 @@ def r4(x):
     return None if x is None else round(x, 4)
 
 
+def describe_report(text: str) -> None:
+    """Print the shape of the IBKR report (format, row types, fields, dates). No values."""
+    from collections import Counter
+    recs = list(flex._records(text))
+    fmt = "XML" if text.lstrip("\ufeff \r\n\t").startswith("<") else "CSV"
+    kinds = Counter(flex.report_kind(f) or (t if t != "csv" else "other") for t, f in recs)
+    print(f"IBKR report: {fmt}, rows by type: " + ", ".join(f"{k}={n}" for k, n in kinds.most_common(12)))
+    for want in ("changeinnav", "navsummary"):
+        rows = [f for _, f in recs if flex.report_kind(f) == want]
+        if rows:
+            dates = sorted(filter(None, (flex.parse_date(f.get("todate") or f.get("reportdate")) for f in rows)))
+            print(f"  {want} fields: {', '.join(sorted(rows[0]))}")
+            if dates:
+                print(f"  {want} dates: {dates[0]} to {dates[-1]}")
+    if not kinds.get("changeinnav") and not kinds.get("navsummary"):
+        print("  ! No daily account values found. Add 'Change in NAV' (with Breakout by Day) "
+              "or 'Net Asset Value (NAV) in Base' to the Flex Query.")
+
+
 def build(xml_text: str, members: list[dict], manual: dict, rf: float, min_days: int, demo: bool, rf_label: str):
+    if not demo:
+        describe_report(xml_text)
     nav, flows, generated = flex.parse_statement(xml_text)
     for acct, extra in manual.items():
         f = flows.setdefault(acct, {})
@@ -71,9 +92,26 @@ def build(xml_text: str, members: list[dict], manual: dict, rf: float, min_days:
     for acct in sorted(set(nav) - known):
         warnings.append(f"Account {acct} is in the IBKR report but not in members.csv; ignored.")
 
+    print(f"IBKR report: daily values for {len(nav)} account(s): {', '.join(sorted(nav)) or 'none'}")
     for m in members:
         acct = m.get("account_id", "")
+        days = sorted(nav.get(acct, {}))
         series = metrics.daily_returns(nav.get(acct, {}), flows.get(acct, {})) if acct else []
+        if not acct:
+            note = "No IBKR account linked yet"
+        elif not days:
+            note = "Account not found in the IBKR report"
+        elif len(days) < 2:
+            note = "IBKR sent only one day of values"
+        elif not series:
+            note = "Account not funded yet"
+        elif all(r == 0 for _, r, _ in series):
+            note = "No trades yet"
+        else:
+            note = ""
+        print(f"  {m['name']} ({acct or 'no account'}): {len(days)} daily values"
+              + (f" {days[0]} to {days[-1]}" if days else "")
+              + f", {len(flows.get(acct, {}))} deposit day(s), {len(series)} returns. {note}")
         for d, r, _ in series:
             if abs(r) > 0.25:
                 warnings.append(f"{m['name']}: {r:+.1%} on {d}. If that was a cash transfer, add it to manual_flows.csv.")
@@ -88,6 +126,7 @@ def build(xml_text: str, members: list[dict], manual: dict, rf: float, min_days:
             "name": m["name"],
             "role": m.get("role", ""),
             "windows": wins,
+            "note": note,
             "spark": [round(v, 4) for v in metrics.growth_index([r for _, r, _ in series])] if series else [],
         })
 
