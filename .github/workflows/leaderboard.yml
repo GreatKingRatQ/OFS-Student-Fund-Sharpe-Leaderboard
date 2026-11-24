@@ -1,0 +1,48 @@
+name: Update Sharpe leaderboard
+
+on:
+  schedule:
+    # 07:13 UTC, Tuesday to Saturday: after IBKR has closed the previous US trading day.
+    - cron: "13 7 * * 2-6"
+  workflow_dispatch:  # "Run workflow" button in the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Test
+        run: python3 -m unittest discover tests
+
+      - name: Build page from IBKR
+        env:
+          IBKR_FLEX_TOKEN: ${{ secrets.IBKR_FLEX_TOKEN }}
+          IBKR_FLEX_QUERY_ID: ${{ secrets.IBKR_FLEX_QUERY_ID }}
+          RISK_FREE_RATE: ${{ vars.RISK_FREE_RATE }}
+          RISK_FREE_LABEL: ${{ vars.RISK_FREE_LABEL }}
+          MIN_DAYS: ${{ vars.MIN_DAYS }}
+        run: python3 src/build.py --out site/index.html
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
